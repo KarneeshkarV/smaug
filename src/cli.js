@@ -14,7 +14,8 @@
 
 import { fetchAndPrepareBookmarks } from './processor.js';
 import { initConfig, loadConfig } from './config.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { createTwitterClient } from './twitter-client.js';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -45,13 +46,22 @@ async function setup() {
 This will set up Smaug to automatically archive your Twitter bookmarks.
 `);
 
-  // Step 1: Check for bird CLI with bookmarks support (v0.5.0+)
-  console.log('Step 1: Checking for bird CLI...');
+  // Step 1: Choose and check the Twitter client
+  console.log(`Step 1: Choose a Twitter client
+
+  1. bird        (npm install -g @steipete/bird@latest)
+  2. twitter-cli (uv tool install twitter-cli)
+`);
+  const clientChoice = await prompt('  Client [1]: ');
+  const twitterClient = clientChoice === '2' || clientChoice === 'twitter-cli' ? 'twitter-cli' : 'bird';
+  const clientBin = twitterClient === 'bird' ? 'bird' : 'twitter';
+
+  console.log(`\n  Checking for ${twitterClient}...`);
   try {
-    const versionOutput = execSync('bird --version', { stdio: 'pipe', encoding: 'utf8' });
+    const versionOutput = execFileSync(clientBin, ['--version'], { stdio: 'pipe', encoding: 'utf8' });
     const versionMatch = versionOutput.match(/(\d+)\.(\d+)\.(\d+)/);
 
-    if (versionMatch) {
+    if (twitterClient === 'bird' && versionMatch) {
       const [, major, minor] = versionMatch.map(Number);
       if (major === 0 && minor < 5) {
         console.log(`  ✗ bird CLI v${versionMatch[0]} found, but v0.5.0+ required for bookmarks support
@@ -66,18 +76,19 @@ This will set up Smaug to automatically archive your Twitter bookmarks.
 `);
         process.exit(1);
       }
-      console.log(`  ✓ bird CLI v${versionMatch[0]} found (bookmarks supported)\n`);
-    } else {
-      console.log('  ✓ bird CLI found\n');
     }
+    console.log(`  ✓ ${twitterClient}${versionMatch ? ` v${versionMatch[0]}` : ''} found\n`);
   } catch {
-    console.log(`  ✗ bird CLI not found
-
-  Install it:
-    npm install -g @steipete/bird@latest
+    const install = twitterClient === 'bird'
+      ? `npm install -g @steipete/bird@latest
 
   Or with Homebrew:
-    brew install steipete/tap/bird
+    brew install steipete/tap/bird`
+      : 'uv tool install twitter-cli';
+    console.log(`  ✗ ${twitterClient} not found
+
+  Install it:
+    ${install}
 
   Then run this setup again.
 `);
@@ -94,25 +105,28 @@ This will set up Smaug to automatically archive your Twitter bookmarks.
   2. Press F12 to open Developer Tools
   3. Go to Application → Cookies → twitter.com
   4. Find 'auth_token' and 'ct0'
-`);
+${twitterClient === 'twitter-cli' ? `
+  twitter-cli can also read cookies from your browser. Leave both empty to use that.
+` : ''}`);
 
+  const credentialsOptional = twitterClient === 'twitter-cli';
   const authToken = await prompt('  Paste your auth_token: ');
-  if (!authToken) {
+  if (!authToken && !credentialsOptional) {
     console.log('  ✗ auth_token is required');
     process.exit(1);
   }
 
   const ct0 = await prompt('  Paste your ct0: ');
-  if (!ct0) {
+  if (!ct0 && !credentialsOptional) {
     console.log('  ✗ ct0 is required');
     process.exit(1);
   }
 
   // Step 3: Test credentials
   console.log('\nStep 3: Testing credentials...');
+  const twitter = authToken || ct0 ? { authToken, ct0 } : undefined;
   try {
-    const env = { ...process.env, AUTH_TOKEN: authToken, CT0: ct0 };
-    execSync('bird bookmarks -n 1 --json', { env, stdio: 'pipe', timeout: 30000 });
+    createTwitterClient({ twitterClient, twitter }).bookmarks(1);
     console.log('  ✓ Credentials work!\n');
   } catch (error) {
     console.log(`  ✗ Could not fetch bookmarks. Check your credentials and try again.
@@ -128,10 +142,8 @@ This will set up Smaug to automatically archive your Twitter bookmarks.
     pendingFile: './.state/pending-bookmarks.json',
     stateFile: './.state/bookmarks-state.json',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York',
-    twitter: {
-      authToken,
-      ct0
-    },
+    twitterClient,
+    ...(twitter && { twitter }),
     autoInvokeClaude: true,
     claudeModel: 'sonnet'
   };

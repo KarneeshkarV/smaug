@@ -4,6 +4,7 @@
   "stateFile": "./.state/bookmarks-state.json",
   "parallelThreshold": 8,
   "timezone": "UTC",
+  "twitterClient": "bird",
   "twitter": {
     "authToken": "YOUR_AUTH_TOKEN_HERE",
     "ct0": "YOUR_CT0_HERE"

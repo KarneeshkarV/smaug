@@ -31,8 +31,15 @@ const DEFAULT_CONFIG = {
   // Timezone for date formatting
   timezone: 'America/New_York',
 
+  // Twitter client: 'bird' (https://github.com/steipete/bird)
+  // or 'twitter-cli' (https://github.com/jackwener/twitter-cli)
+  twitterClient: 'bird',
+
   // Path to bird CLI (if not in PATH)
   birdPath: null,
+
+  // Path to twitter-cli (if not in PATH)
+  twitterCliPath: null,
 
   // Twitter credentials (can also use AUTH_TOKEN and CT0 env vars)
   twitter: {
@@ -109,8 +116,11 @@ const DEFAULT_CONFIG = {
   },
 
   // Tools to use for different content types
-  // allowedTools: the Claude Code tools the processor can use
-  allowedTools: 'Read,Write,Edit,Glob,Grep,Bash,Task,TodoWrite',
+  // allowedTools: the Claude Code tools the processor can use.
+  // File tools are limited to the project, archive, pending and category folders.
+  // Bash is not in the default: bookmark content is untrusted and can hold
+  // prompt injection, so the AI must not run shell commands.
+  allowedTools: 'Read,Write,Edit,Glob,Grep,Task,TodoWrite',
 
   // ---- Automation settings (for scheduled jobs) ----
 
@@ -218,8 +228,14 @@ export function loadConfig(configPath) {
   if (process.env.TIMEZONE) {
     config.timezone = process.env.TIMEZONE;
   }
+  if (process.env.TWITTER_CLIENT) {
+    config.twitterClient = process.env.TWITTER_CLIENT;
+  }
   if (process.env.BIRD_PATH) {
     config.birdPath = process.env.BIRD_PATH;
+  }
+  if (process.env.TWITTER_CLI_PATH) {
+    config.twitterCliPath = process.env.TWITTER_CLI_PATH;
   }
   if (process.env.SOURCE) {
     config.source = process.env.SOURCE;
@@ -268,6 +284,7 @@ export function loadConfig(configPath) {
   config.pendingFile = expandTilde(config.pendingFile);
   config.stateFile = expandTilde(config.stateFile);
   config.birdPath = expandTilde(config.birdPath);
+  config.twitterCliPath = expandTilde(config.twitterCliPath);
   config.projectRoot = expandTilde(config.projectRoot);
 
   // Expand ~ in category folders
@@ -295,7 +312,10 @@ export function initConfig(targetPath = './smaug.config.json') {
     pendingFile: './.state/pending-bookmarks.json',
     stateFile: './.state/bookmarks-state.json',
     timezone: 'America/New_York',
+    // Twitter client: 'bird' or 'twitter-cli'
+    twitterClient: 'bird',
     birdPath: null,
+    twitterCliPath: null,
     twitter: {
       authToken: 'YOUR_AUTH_TOKEN_HERE',
       ct0: 'YOUR_CT0_TOKEN_HERE'

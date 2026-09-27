@@ -364,10 +364,85 @@ function findOpenCode() {
   return 'opencode';
 }
 
-function getCLISettings(cliType, config, bookmarkCount) {
+// Environment variables that hold Twitter session cookies - never passed to the AI CLI
+const TWITTER_SECRET_ENV = ['AUTH_TOKEN', 'CT0', 'TWITTER_AUTH_TOKEN', 'TWITTER_CT0'];
+
+/**
+ * Paths the AI CLI may access. It may read the project and the archive, and
+ * write only the archive file, the pending file directory (batch files) and the
+ * category folders. It cannot write code, git hooks or config in the project.
+ */
+export function getAIAccess(config) {
+  const root = path.resolve(config.projectRoot || process.cwd());
+  const archiveFile = config.archiveFile && path.resolve(root, config.archiveFile);
+  const writeDirs = new Set();
+  if (config.pendingFile) writeDirs.add(path.dirname(path.resolve(root, config.pendingFile)));
+  for (const category of Object.values(config.categories || {})) {
+    if (category?.folder) writeDirs.add(path.resolve(root, category.folder));
+  }
+  const readDirs = new Set([root, ...writeDirs]);
+  if (archiveFile) readDirs.add(path.dirname(archiveFile));
+  return { readDirs: [...readDirs], writeDirs: [...writeDirs], writeFiles: archiveFile ? [archiveFile] : [] };
+}
+
+// Files the AI CLI must never read (they hold Twitter credentials)
+export function getAISecretFiles(config) {
+  const root = path.resolve(config.projectRoot || process.cwd());
+  return [
+    path.join(root, 'smaug.config.json'),
+    path.join(root, 'bookmarks-archiver.config.json'),
+    path.join(os.homedir(), '.smaug.json'),
+    path.join(os.homedir(), '.config/smaug/config.json')
+  ];
+}
+
+// OpenCode matches edit rules against paths relative to the git worktree root
+// ("/" outside a git repo)
+function openCodeWorktree(root) {
+  try {
+    return execSync('git rev-parse --show-toplevel', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return path.parse(root).root;
+  }
+}
+
+// Claude Code permission rules use "//" for absolute paths
+function claudePathRule(p) {
+  return '/' + p.split(path.sep).join('/');
+}
+
+/**
+ * Build the prompt. The AI has no shell, so it gets the values it needs here
+ * instead of running commands to find them.
+ */
+function buildPrompt(config, bookmarkCount) {
+  const tz = config.timezone || 'America/New_York';
+  const today = new Date().toLocaleDateString('en-US', {
+    timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+  });
+  const root = path.resolve(config.projectRoot || process.cwd());
+  const abs = p => p && path.resolve(root, p);
+  const categories = Object.fromEntries(Object.entries(config.categories || {}).map(
+    ([key, category]) => [key, category?.folder ? { ...category, folder: abs(category.folder) } : category]
+  ));
+  const settings = {
+    today,
+    archiveFile: abs(config.archiveFile),
+    pendingFile: abs(config.pendingFile),
+    stateFile: abs(config.stateFile),
+    parallelThreshold: config.parallelThreshold ?? 8,
+    categories
+  };
+  return `Process the ${bookmarkCount} bookmark(s) in the pending file following the instructions in ./.claude/commands/process-bookmarks.md. Read that file first, then process each bookmark.
+
+Settings for this run (use these; smaug.config.json is not readable):
+${JSON.stringify(settings, null, 2)}`;
+}
+
+export function getCLISettings(cliType, config, bookmarkCount) {
   const isWindows = process.platform === 'win32';
   const pathSep = isWindows ? ';' : ':';
-  const prompt = `Process the ${bookmarkCount} bookmark(s) in ./.state/pending-bookmarks.json following the instructions in ./.claude/commands/process-bookmarks.md. Read that file first, then process each bookmark.`;
+  const prompt = buildPrompt(config, bookmarkCount);
   
   const nodePaths = [
     '/usr/local/bin',
@@ -379,18 +454,48 @@ function getCLISettings(cliType, config, bookmarkCount) {
   ];
   const enhancedPath = [...nodePaths.filter(Boolean), process.env.PATH || ''].join(pathSep);
   const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+  const cleanEnv = { ...process.env };
+  for (const key of TWITTER_SECRET_ENV) delete cleanEnv[key];
+  const access = getAIAccess(config);
+  const secretFiles = getAISecretFiles(config);
 
   if (cliType === 'opencode') {
     const model = config.opencodeModel || 'opencode/glm-4.7-free';
+    const worktree = openCodeWorktree(path.resolve(config.projectRoot || process.cwd()));
+    const editPattern = p => path.relative(worktree, p).split(path.sep).join('/');
+    // No shell or network tools; file access limited as in getAIAccess
+    const permission = {
+      // 'ask' auto-rejects every command in `opencode run`. 'deny' would do the
+      // same, but the OpenCode free tier refuses requests without the bash tool.
+      bash: 'ask',
+      webfetch: 'deny',
+      websearch: 'deny',
+      codesearch: 'deny',
+      external_directory: {
+        '*': 'deny',
+        ...Object.fromEntries(access.readDirs.map(d => [path.join(d, '*'), 'allow']))
+      },
+      edit: {
+        '*': 'deny',
+        ...Object.fromEntries(access.writeDirs.map(d => [`${editPattern(d)}/*`, 'allow'])),
+        ...Object.fromEntries(access.writeFiles.map(f => [editPattern(f), 'allow']))
+      },
+      read: {
+        '*': 'allow',
+        ...Object.fromEntries(secretFiles.map(f => [f, 'deny'])),
+        '*smaug.config.json': 'deny'
+      }
+    };
     return {
       binary: findOpenCode(),
       model,
       args: ['run', '--format', 'json', '--model', model, prompt],
       env: {
-        ...process.env,
+        ...cleanEnv,
         PATH: enhancedPath,
         ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
-        OPENCODE_MODEL: model
+        OPENCODE_MODEL: model,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission })
       },
       shell: false,
       stdin: 'ignore'
@@ -398,8 +503,18 @@ function getCLISettings(cliType, config, bookmarkCount) {
   }
 
   const model = config.claudeModel || 'sonnet';
-  const allowedTools = config.allowedTools || 'Read,Write,Edit,Glob,Grep,Bash,Task,TodoWrite';
-  const cleanEnv = { ...process.env };
+  const tools = (config.allowedTools || 'Read,Write,Edit,Glob,Grep,Task,TodoWrite')
+    .split(',').map(t => t.trim()).filter(Boolean);
+  // File tools are allowed only as in getAIAccess (Read rules also cover Glob and
+  // Grep, Edit rules also cover Write). Other listed tools are allowed as named.
+  const fileTools = new Set(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+  const allowRules = [
+    ...access.readDirs.map(d => `Read(${claudePathRule(d)}/**)`),
+    ...access.writeDirs.map(d => `Edit(${claudePathRule(d)}/**)`),
+    ...access.writeFiles.map(f => `Edit(${claudePathRule(f)})`),
+    ...tools.filter(t => !fileTools.has(t))
+  ];
+  const denyRules = secretFiles.flatMap(f => [`Read(${claudePathRule(f)})`, `Edit(${claudePathRule(f)})`]);
   delete cleanEnv.CLAUDECODE;
   delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
@@ -408,7 +523,16 @@ function getCLISettings(cliType, config, bookmarkCount) {
     model,
     args: [
       '--print', '--verbose', '--output-format', 'stream-json',
-      '--model', model, '--allowedTools', allowedTools, '--', prompt
+      '--model', model,
+      // Ignore user and project settings so they cannot widen these permissions
+      '--setting-sources', '',
+      '--strict-mcp-config',
+      '--tools', tools.join(','),
+      '--allowedTools', allowRules.join(','),
+      '--disallowedTools', denyRules.join(','),
+      // Deny anything not allowed above instead of prompting
+      '--permission-mode', 'dontAsk',
+      '--', prompt
     ],
     env: {
       ...cleanEnv,
@@ -848,6 +972,14 @@ export async function run(options = {}) {
           }, null, 2));
 
           console.log(`[${now}] Cleaned up ${idsToProcess.length} processed bookmarks, ${remaining.length} remaining`);
+        }
+
+        // Remove batch files written by parallel subagents
+        const batchDir = path.join(path.resolve(config.projectRoot || process.cwd()), '.state');
+        if (fs.existsSync(batchDir)) {
+          for (const name of fs.readdirSync(batchDir)) {
+            if (/^batch-\d+\.md$/.test(name)) fs.unlinkSync(path.join(batchDir, name));
+          }
         }
 
         // Send success notification

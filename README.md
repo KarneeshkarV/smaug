@@ -34,8 +34,9 @@ Archive your Twitter/X bookmarks (and/or optionally, likes) to markdown. Automat
 ## Quick Start (5 minutes)
 
 ```bash
-# 1. Install bird CLI (Twitter API wrapper)
-# See https://github.com/steipete/bird for installation
+# 1. Install a Twitter client: bird or twitter-cli
+# bird: see https://github.com/steipete/bird
+# twitter-cli: uv tool install twitter-cli (https://github.com/jackwener/twitter-cli)
 
 # 2. Clone and install Smaug
 git clone https://github.com/alexknowshtml/smaug
@@ -50,13 +51,15 @@ npx smaug run
 ```
 
 The setup wizard will:
+- Let you choose bird or twitter-cli
 - Create required directories
 - Guide you through getting Twitter credentials
 - Create your config file
 
 ## Manually Getting Twitter Credentials
 
-Smaug uses the bird CLI which needs your Twitter session cookies.
+Smaug uses bird or twitter-cli, which need your Twitter session cookies.
+twitter-cli can also read the cookies from your browser, so you can leave `twitter` out of the config when you use it.
 
 If you don't want to use the wizard to make it easy, you can manually put your session info into the config.
 
@@ -335,6 +338,7 @@ Example `smaug.config.json`:
   "pendingFile": "./.state/pending-bookmarks.json",
   "stateFile": "./.state/bookmarks-state.json",
   "timezone": "America/New_York",
+  "twitterClient": "bird",
   "twitter": {
     "authToken": "your_auth_token",
     "ct0": "your_ct0"
@@ -342,7 +346,7 @@ Example `smaug.config.json`:
   "autoInvokeClaude": true,
   "claudeModel": "sonnet",
   "claudeTimeout": 900000,
-  "allowedTools": "Read,Write,Edit,Glob,Grep,Bash,Task,TodoWrite",
+  "allowedTools": "Read,Write,Edit,Glob,Grep,Task,TodoWrite",
   "webhookUrl": null,
   "webhookType": "discord"
 }
@@ -354,6 +358,10 @@ Example `smaug.config.json`:
 | `includeMedia` | `false` | **EXPERIMENTAL**: Include media attachments (photos, videos, GIFs) |
 | `archiveFile` | `./bookmarks.md` | Main archive file |
 | `timezone` | `America/New_York` | For date formatting |
+| `twitterClient` | `bird` | Twitter client: `bird` or `twitter-cli` |
+| `birdPath` | `null` | Path to the bird binary (default: `bird` on PATH) |
+| `twitterCliPath` | `null` | Path to the twitter-cli binary (default: `twitter` on PATH) |
+| `allowedTools` | `Read,Write,Edit,Glob,Grep,Task,TodoWrite` | Claude Code tools. Bash is left out on purpose (see below) |
 | `cliTool` | `claude` | AI CLI to use: `claude` or `opencode` |
 | `autoInvokeClaude` | `true` | Auto-run Claude Code for analysis |
 | `claudeModel` | `sonnet` | Model to use (`sonnet`, `haiku`, or `opus`) |
@@ -363,7 +371,19 @@ Example `smaug.config.json`:
 | `parallelThreshold` | `8` | Min bookmarks before parallel processing kicks in |
 | `webhookUrl` | `null` | Discord/Slack webhook for notifications |
 
-Environment variables also work: `AUTH_TOKEN`, `CT0`, `SOURCE`, `INCLUDE_MEDIA`, `ARCHIVE_FILE`, `TIMEZONE`, `CLI_TOOL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.
+Environment variables also work: `AUTH_TOKEN`, `CT0`, `SOURCE`, `INCLUDE_MEDIA`, `ARCHIVE_FILE`, `TIMEZONE`, `TWITTER_CLIENT`, `TWITTER_CLI_PATH`, `CLI_TOOL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.
+
+### Security: Bookmarks Are Untrusted
+
+Tweets and linked pages can contain prompt injection.
+When smaug runs the AI CLI, it limits what the AI can do:
+- No shell (Bash), no web tools, and no MCP servers.
+- Reads are limited to the project, pending, archive, and category folders.
+- Writes are limited to the archive file, the pending folder, and the category folders.
+- The config files with your cookies are not readable, and `AUTH_TOKEN`, `CT0`, `TWITTER_AUTH_TOKEN`, and `TWITTER_CT0` are removed from the AI CLI environment.
+- Smaug does not run git. Review and commit the changes yourself.
+
+If you add `Bash` to `allowedTools`, a malicious bookmark can run commands on your machine.
 
 ### Experimental: Media Attachments
 
@@ -468,7 +488,7 @@ Main (sonnet):
 
 ### Cost Optimization: Haiku Subagents
 
-For large batches (8+ bookmarks by default), Smaug spawns parallel subagents. By default, these use Haiku instead of Sonnet, which cuts costs nearly in half:
+For large batches (8+ bookmarks by default), Smaug spawns parallel subagents. These use Sonnet by default. Haiku cuts costs nearly in half:
 
 | Configuration | 20 Bookmarks | Time |
 |---------------|--------------|------|
@@ -477,14 +497,15 @@ For large batches (8+ bookmarks by default), Smaug spawns parallel subagents. By
 
 Same speed, ~50% cheaper. The categorization and filing tasks don't require Sonnet-level reasoning, so Haiku handles them well.
 
-This is configured in `.claude/commands/process-bookmarks.md` with `model="haiku"` in the Task calls.
+This is configured in `.claude/commands/process-bookmarks.md` with `model="sonnet"` in the Task calls.
+Change it to `model="haiku"` if your account has Haiku access.
 
 ## Troubleshooting
 
 ### "No new bookmarks to process"
 
 This means either:
-1. No bookmarks were fetched (check bird CLI credentials)
+1. No bookmarks were fetched (check your bird or twitter-cli credentials)
 2. All fetched bookmarks already exist in `bookmarks.md`
 
 To start fresh:
