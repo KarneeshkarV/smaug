@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 
 const DEFAULT_CONFIG = {
-  // Source to fetch from: 'bookmarks', 'likes', or 'both'
+  // Source to fetch from: 'bookmarks', 'likes', 'both', or 'whatsapp'
   source: 'bookmarks',
 
   // EXPERIMENTAL: Include media attachments (photos, videos, GIFs)
@@ -56,6 +56,21 @@ const DEFAULT_CONFIG = {
   //     "0987654321": "articles-to-read"
   //   }
   folders: {},
+
+  // ---- WhatsApp (source: 'whatsapp') ----
+  // Archive tweets linked in WhatsApp chats, read with wacli (https://wacli.sh).
+  // Map chat JIDs to tag names. Find JIDs with: wacli chats list --query <name>
+  // Example:
+  //   whatsapp: {
+  //     chats: { "120363000000000000@g.us": "friends" },
+  //     messageLimit: 1000
+  //   }
+  whatsapp: {
+    wacliPath: null,
+    chats: {},
+    // Newest messages to scan per chat
+    messageLimit: 1000
+  },
 
   // ---- Categories: Define how different bookmark types are handled ----
   // Each category has:
@@ -137,7 +152,7 @@ const DEFAULT_CONFIG = {
   claudeModel: 'sonnet',
 
   // OpenCode model to use (any OpenCode-compatible model)
-  opencodeModel: 'opencode/glm-4.7-free',
+  opencodeModel: 'opencode/nemotron-3-ultra-free',
 
   // Claude invocation timeout in ms (default 15 min)
   claudeTimeout: 900000,
@@ -212,6 +227,10 @@ export function loadConfig(configPath) {
     folders: {
       ...DEFAULT_CONFIG.folders,
       ...fileConfig.folders
+    },
+    whatsapp: {
+      ...DEFAULT_CONFIG.whatsapp,
+      ...fileConfig.whatsapp
     }
   };
 
@@ -285,6 +304,7 @@ export function loadConfig(configPath) {
   config.stateFile = expandTilde(config.stateFile);
   config.birdPath = expandTilde(config.birdPath);
   config.twitterCliPath = expandTilde(config.twitterCliPath);
+  if (config.whatsapp) config.whatsapp.wacliPath = expandTilde(config.whatsapp.wacliPath);
   config.projectRoot = expandTilde(config.projectRoot);
 
   // Expand ~ in category folders
@@ -304,7 +324,7 @@ export function loadConfig(configPath) {
  */
 export function initConfig(targetPath = './smaug.config.json') {
   const exampleConfig = {
-    // Source: 'bookmarks' (default), 'likes', or 'both'
+    // Source: 'bookmarks' (default), 'likes', 'both', or 'whatsapp'
     source: 'bookmarks',
     // EXPERIMENTAL: Include media attachments (photos, videos, GIFs)
     // includeMedia: false,
@@ -330,6 +350,15 @@ export function initConfig(targetPath = './smaug.config.json') {
       // "0987654321": "articles-to-read"
     },
 
+    // WhatsApp chats for source 'whatsapp' - map chat JIDs to tag names
+    // Find JIDs with: wacli chats list --query <name>
+    whatsapp: {
+      chats: {
+        // Example:
+        // "120363000000000000@g.us": "friends"
+      }
+    },
+
     // Categories define how different bookmark types are handled
     // Customize or add your own! See README for details.
     // Defaults: github->tools, articles->articles, youtube/podcast->transcribe
@@ -351,7 +380,7 @@ export function initConfig(targetPath = './smaug.config.json') {
     cliTool: 'claude',
     // Models for each CLI
     claudeModel: 'sonnet',
-    opencodeModel: 'opencode/glm-4.7-free',
+    opencodeModel: 'opencode/nemotron-3-ultra-free',
     claudeTimeout: 900000,
 
     // Notifications (optional)

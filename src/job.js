@@ -460,7 +460,7 @@ export function getCLISettings(cliType, config, bookmarkCount) {
   const secretFiles = getAISecretFiles(config);
 
   if (cliType === 'opencode') {
-    const model = config.opencodeModel || 'opencode/glm-4.7-free';
+    const model = config.opencodeModel || 'opencode/nemotron-3-ultra-free';
     const worktree = openCodeWorktree(path.resolve(config.projectRoot || process.cwd()));
     const editPattern = p => path.relative(worktree, p).split(path.sep).join('/');
     // No shell or network tools; file access limited as in getAIAccess

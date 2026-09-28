@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { normalizeTwitterCliTweet, parseTwitterCliOutput, createTwitterClient } from '../src/twitter-client.js';
+import { extractTweetIds, findSharedTweets } from '../src/whatsapp.js';
 
 describe('normalizeTwitterCliTweet', () => {
   test('maps author, date, quote, and article to the bird shape', () => {
@@ -53,4 +54,25 @@ describe('createTwitterClient', () => {
       assert.throws(() => client.bookmarks('5 --x'), /Invalid count/);
     });
   }
+});
+
+describe('extractTweetIds', () => {
+  test('finds X and Twitter status links in message text', () => {
+    const text = 'look https://x.com/alice/status/123?s=20 and https://twitter.com/i/web/status/456\nhttps://x.com/i/status/789 https://example.com/status/1';
+    assert.deepStrictEqual(extractTweetIds(text), ['123', '456', '789']);
+  });
+
+  test('ignores text without tweet links', () => {
+    assert.deepStrictEqual(extractTweetIds('https://x.com/alice'), []);
+    assert.deepStrictEqual(extractTweetIds(undefined), []);
+  });
+});
+
+describe('findSharedTweets', () => {
+  test('rejects chat JIDs that could be read as flags', () => {
+    assert.throws(
+      () => findSharedTweets({ whatsapp: { chats: { '--help': 'x' }, wacliPath: '/nonexistent' } }),
+      /Invalid WhatsApp chat JID/
+    );
+  });
 });

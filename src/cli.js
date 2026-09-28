@@ -257,8 +257,8 @@ async function main() {
       let source = null;
       if (sourceIdx !== -1 && args[sourceIdx + 1]) {
         source = args[sourceIdx + 1];
-        if (!['bookmarks', 'likes', 'both'].includes(source)) {
-          console.error(`Invalid source: ${source}. Must be 'bookmarks', 'likes', or 'both'.`);
+        if (!['bookmarks', 'likes', 'both', 'whatsapp'].includes(source)) {
+          console.error(`Invalid source: ${source}. Must be 'bookmarks', 'likes', 'both', or 'whatsapp'.`);
           process.exit(1);
         }
       }
@@ -365,7 +365,7 @@ Commands:
   fetch --all    Fetch ALL bookmarks (paginated)
   fetch --max-pages N  Limit pagination to N pages (default: 10)
   fetch --force  Re-fetch even if already archived
-  fetch --source <source>  Fetch from: bookmarks, likes, or both
+  fetch --source <source>  Fetch from: bookmarks, likes, both, or whatsapp
   fetch --media  EXPERIMENTAL: Include media attachments
   process        Show pending tweets
   status         Show current status
@@ -380,13 +380,15 @@ Examples:
   smaug fetch --all --max-pages 5  # Fetch up to 5 pages
   smaug fetch --source likes     # Fetch from likes only
   smaug fetch --source both      # Fetch from bookmarks AND likes
+  smaug fetch --source whatsapp  # Fetch tweets linked in WhatsApp chats (wacli)
   smaug fetch --media            # Include photos/videos/GIFs (experimental)
   smaug fetch --force            # Re-process archived tweets
 
 Config (smaug.config.json):
-  "source": "bookmarks"    Default source (bookmarks, likes, or both)
+  "source": "bookmarks"    Default source (bookmarks, likes, both, or whatsapp)
   "includeMedia": false    EXPERIMENTAL: Include media (default: off)
   "folders": {}            Map folder IDs to tags (see README)
+  "whatsapp": {"chats": {}} Map WhatsApp chat JIDs to tags (see README)
 
 More info: https://github.com/alexknowshtml/smaug
 `);

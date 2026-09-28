@@ -3,6 +3,7 @@
  *
  * This handles the mechanical work:
  * - Fetching bookmarks via bird CLI or twitter-cli
+ * - Reading tweet links shared in WhatsApp chats via wacli
  * - Expanding t.co links
  * - Extracting content from linked pages (articles, GitHub repos)
  * - Optional: Bypassing paywalls via archive.ph
@@ -17,6 +18,7 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 import { loadConfig } from './config.js';
 import { createTwitterClient } from './twitter-client.js';
+import { findSharedTweets } from './whatsapp.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -266,10 +268,40 @@ export function fetchLikes(config, count = 10) {
   }
 }
 
+/**
+ * Fetch tweets linked in the configured WhatsApp chats, tagged with the chat tag.
+ * Tweets in skipIds are not fetched, so already archived links cost nothing.
+ */
+export function fetchWhatsApp(config, count = 10, { skipIds = new Set() } = {}) {
+  const chats = Object.keys(config.whatsapp?.chats || {});
+  if (chats.length === 0) {
+    throw new Error('No WhatsApp chats configured. Set whatsapp.chats in smaug.config.json.');
+  }
+  console.log(`  Reading tweet links from ${chats.length} WhatsApp chat(s) via wacli...`);
+
+  const shared = findSharedTweets(config).filter(s => !skipIds.has(s.tweetId));
+  console.log(`  Found ${shared.length} new tweet link(s)`);
+
+  const client = createTwitterClient(config);
+  const tweets = [];
+  for (const { tweetId, tag } of shared.slice(0, count)) {
+    try {
+      const tweet = client.readTweet(tweetId);
+      if (tag) tweet._folderTag = tag;
+      tweets.push(tweet);
+    } catch (error) {
+      console.log(`  Could not fetch tweet ${tweetId}: ${error.message}`);
+    }
+  }
+  return tweets;
+}
+
 export function fetchFromSource(config, count = 10, options = {}) {
   const source = config.source || 'bookmarks';
 
-  if (source === 'bookmarks') {
+  if (source === 'whatsapp') {
+    return fetchWhatsApp(config, count, options);
+  } else if (source === 'bookmarks') {
     return fetchBookmarks(config, count, options);
   } else if (source === 'likes') {
     return fetchLikes(config, count);
@@ -287,7 +319,7 @@ export function fetchFromSource(config, count = 10, options = {}) {
     }
     return merged;
   } else {
-    throw new Error(`Invalid source: ${source}. Must be 'bookmarks', 'likes', or 'both'.`);
+    throw new Error(`Invalid source: ${source}. Must be 'bookmarks', 'likes', 'both', or 'whatsapp'.`);
   }
 }
 
@@ -508,10 +540,22 @@ export async function fetchAndPrepareBookmarks(options = {}) {
   const configWithOptions = { ...config, source, includeMedia };
   const count = options.count || 20;
 
+  // Get IDs already processed or pending
+  const existingIds = getExistingBookmarkIds(config);
+  let pendingIds = new Set();
+  try {
+    if (fs.existsSync(config.pendingFile)) {
+      const pending = JSON.parse(fs.readFileSync(config.pendingFile, 'utf8'));
+      pendingIds = new Set((pending.bookmarks || []).map(b => b.id.toString()));
+    }
+  } catch (e) {}
+
   // Build fetch options for pagination
   const fetchOptions = {
     all: options.all || count > 50,
-    maxPages: options.maxPages
+    maxPages: options.maxPages,
+    // WhatsApp links are fetched one by one, so skip known tweets before fetching
+    skipIds: options.force || options.specificIds ? new Set() : new Set([...existingIds, ...pendingIds])
   };
 
   let tweets = [];
@@ -531,16 +575,6 @@ export async function fetchAndPrepareBookmarks(options = {}) {
     console.log(`No ${source} found`);
     return { bookmarks: [], count: 0 };
   }
-
-  // Get IDs already processed or pending
-  const existingIds = getExistingBookmarkIds(config);
-  let pendingIds = new Set();
-  try {
-    if (fs.existsSync(config.pendingFile)) {
-      const pending = JSON.parse(fs.readFileSync(config.pendingFile, 'utf8'));
-      pendingIds = new Set((pending.bookmarks || []).map(b => b.id.toString()));
-    }
-  } catch (e) {}
 
   // Determine which tweets to process
   let toProcess;

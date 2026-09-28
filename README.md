@@ -13,6 +13,7 @@ Archive your Twitter/X bookmarks (and/or optionally, likes) to markdown. Automat
 - [What It Does](#what-it-does)
 - [Running](#running)
 - [Categories](#categories)
+- [WhatsApp Chats](#whatsapp-chats)
 - [Automation](#automation)
 - [Output](#output)
 - [Configuration](#configuration)
@@ -116,6 +117,9 @@ npx smaug fetch --source likes
 
 # Fetch from both bookmarks AND likes
 npx smaug fetch --source both
+
+# Fetch tweets linked in WhatsApp chats (see WhatsApp Chats below)
+npx smaug fetch --source whatsapp
 
 # Process already-fetched tweets
 npx smaug process
@@ -239,6 +243,35 @@ When folders are configured:
 
 **Note:** Twitter's API doesn't return folder membership when fetching all bookmarks at once, so Smaug must fetch each folder individually.
 
+## WhatsApp Chats
+
+Smaug can archive tweets that people share in WhatsApp chats.
+It reads the chats with [wacli](https://wacli.sh) and fetches each linked tweet with your Twitter client.
+
+1. Install wacli, run `wacli auth`, and keep the store current with `wacli sync`.
+2. Find the chat JIDs:
+   ```bash
+   wacli chats list --query "chat name"
+   ```
+3. Map the JIDs to tag names and set the source:
+   ```json
+   {
+     "source": "whatsapp",
+     "whatsapp": {
+       "chats": {
+         "120363000000000000@g.us": "friends",
+         "919800000000@s.whatsapp.net": "saved"
+       },
+       "messageLimit": 1000
+     }
+   }
+   ```
+
+Smaug runs wacli with `--read-only`, so it never sends messages or changes the wacli store.
+It uses only X/Twitter status links; other links and the message text are not archived.
+`messageLimit` is the number of newest messages to scan in each chat.
+Tweets that are already archived or pending are not fetched again.
+
 ## Automation
 
 Run Smaug automatically every 30 minutes:
@@ -354,7 +387,8 @@ Example `smaug.config.json`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `source` | `bookmarks` | What to fetch: `bookmarks` (default), `likes`, or `both` |
+| `source` | `bookmarks` | What to fetch: `bookmarks` (default), `likes`, `both`, or `whatsapp` |
+| `whatsapp` | `{}` | WhatsApp chats and wacli settings (see [WhatsApp Chats](#whatsapp-chats)) |
 | `includeMedia` | `false` | **EXPERIMENTAL**: Include media attachments (photos, videos, GIFs) |
 | `archiveFile` | `./bookmarks.md` | Main archive file |
 | `timezone` | `America/New_York` | For date formatting |
@@ -366,7 +400,7 @@ Example `smaug.config.json`:
 | `autoInvokeClaude` | `true` | Auto-run Claude Code for analysis |
 | `claudeModel` | `sonnet` | Model to use (`sonnet`, `haiku`, or `opus`) |
 | `autoInvokeOpencode` | `true` | Auto-run OpenCode for analysis |
-| `opencodeModel` | `opencode/glm-4.7-free` | OpenCode model (see OpenCode docs) |
+| `opencodeModel` | `opencode/nemotron-3-ultra-free` | OpenCode model (see OpenCode docs) |
 | `claudeTimeout` | `900000` | Max processing time (15 min) |
 | `parallelThreshold` | `8` | Min bookmarks before parallel processing kicks in |
 | `webhookUrl` | `null` | Discord/Slack webhook for notifications |
@@ -424,13 +458,13 @@ To use OpenCode instead of Claude Code:
 ```json
 {
   "cliTool": "opencode",
-  "opencodeModel": "opencode/glm-4.7-free",
+  "opencodeModel": "opencode/nemotron-3-ultra-free",
   "autoInvokeOpencode": true
 }
 ```
 
 Available OpenCode models include:
-- `opencode/glm-4.7-free` (free tier)
+- `opencode/nemotron-3-ultra-free` (free tier)
 - `opencode/kimi-k2.5-free` (free tier)
 - `opencode/claude-sonnet-4-5` (Claude via OpenCode)
 - `opencode/gpt-5.2` (GPT via OpenCode)
